@@ -256,29 +256,51 @@ function deleteDbMultiple(sheetName, idField, idsArray) {
     if (!sheet) throw new Error("ระบบไม่พบแผ่นงาน: " + sheetName);
 
     const data = sheet.getDataRange().getValues();
-    const idIndex = data[0].indexOf(idField);
-    const userIndex = data[0].indexOf('username');
+    if (data.length <= 1) return;
+    
+    const headers = data[0];
+    const idIndex = headers.findIndex(h => h.toLowerCase() === idField.toLowerCase());
+    const userIndex = headers.findIndex(h => h.toLowerCase() === 'username');
     if (idIndex === -1) return;
 
-    for (let i = data.length - 1; i >= 1; i--) {
-      if (idsArray.includes(String(data[i][idIndex]))) { 
+    const cleanIds = idsArray.map(id => String(id).trim().toLowerCase());
+    
+    // 🌟 Batch Processing Array
+    let newData = [headers];
+    let isChanged = false;
+
+    for (let i = 1; i < data.length; i++) {
+      const cellValue = String(data[i][idIndex]).trim().toLowerCase();
+      
+      if (cleanIds.indexOf(cellValue) !== -1) { 
         if (userIndex !== -1 && data[i][userIndex] && sheetName !== TABLES.NOTIFICATIONS && sheetName !== TABLES.USERS) {
            let targetUser = String(data[i][userIndex]).trim();
-           if (targetUser) {
-              addNotification({
-                 id: 'NOTIF-' + new Date().getTime() + Math.floor(Math.random()*1000),
-                 target: targetUser,
-                 message: `ข้อมูลรหัส ${data[i][idIndex]} ของคุณถูกลบ/ยกเลิกออกจากระบบแล้ว`,
-                 status: 'unread',
-                 type: 'system',
-                 relatedId: data[i][idIndex],
-                 createdAt: new Date().toISOString()
-              });
-           }
+           addNotification({
+              id: 'NOTIF-' + new Date().getTime() + i, // เลี่ยง ID ซ้ำ
+              target: targetUser,
+              message: `ข้อมูลรหัส ${data[i][idIndex]} ของคุณถูกลบ/ยกเลิกแล้ว`,
+              status: 'unread',
+              type: 'system',
+              relatedId: data[i][idIndex],
+              createdAt: new Date().toISOString()
+           });
         }
-        sheet.deleteRow(i + 1); 
+        isChanged = true;
+      } else {
+        newData.push(data[i]);
       }
     }
+    
+    // 🌟 เขียนลงไปรวดเดียว
+    if (isChanged) {
+      sheet.getRange(1, 1, sheet.getLastRow(), sheet.getLastColumn()).clearContent();
+      if (newData.length > 0) {
+        sheet.getRange(1, 1, newData.length, headers.length).setValues(newData);
+      }
+      SpreadsheetApp.flush(); 
+    }
+  } catch (e) {
+    Logger.log("Error: " + e.message); throw e;
   } finally { lock.releaseLock(); }
 }
 
@@ -359,10 +381,27 @@ function markNotificationsRead(idsArray) {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     const sheet = ss.getSheetByName(TABLES.NOTIFICATIONS);
     if (!sheet) return { success: false };
+    
     const data = sheet.getDataRange().getValues();
-    const idIndex = data[0].indexOf('id'); const statusIndex = data[0].indexOf('status') + 1; 
+    if (data.length <= 1) return { success: true };
+    
+    const headers = data[0];
+    const idIndex = headers.indexOf('id'); 
+    const statusIndex = headers.indexOf('status'); 
+    
+    // 🌟 Batch Processing Array
+    let isChanged = false;
     for (let i = 1; i < data.length; i++) {
-      if (idsArray.includes(String(data[i][idIndex]))) { sheet.getRange(i + 1, statusIndex).setValue('read'); }
+      if (idsArray.includes(String(data[i][idIndex]))) { 
+        data[i][statusIndex] = 'read'; 
+        isChanged = true;
+      }
     }
-  } finally { lock.releaseLock(); } return { success: true };
+    
+    if (isChanged) {
+      sheet.getRange(1, 1, data.length, headers.length).setValues(data);
+      SpreadsheetApp.flush();
+    }
+  } finally { lock.releaseLock(); } 
+  return { success: true };
 }
